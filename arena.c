@@ -52,9 +52,9 @@
 
 typedef struct _heap_info
 {
-  mstate ar_ptr;           /* Arena for this heap. */
-  struct _heap_info *prev; /* Previous heap. */
-  size_t size;             /* Current size in bytes. */
+  mstate ar_ptr;           /* Arena for this heap. */ // 这个 heap 的 arena
+  struct _heap_info *prev; /* Previous heap. */ // 指向上一个 heap
+  size_t size;             /* Current size in bytes. */ // 当前 heap 的 大小
   size_t mprotect_size;    /* Size in bytes that has been mprotected
                            PROT_READ|PROT_WRITE.  */
   /* Make sure the following data is properly aligned, particularly
@@ -449,6 +449,7 @@ static char *aligned_heap_area;
 static heap_info *
 new_heap(size_t size, size_t top_pad)
 {
+  // 获取 页大小
   size_t pagesize = GLRO(dl_pagesize);
   char *p1, *p2;
   unsigned long ul;
@@ -668,13 +669,16 @@ heap_trim(heap_info *heap, size_t pad)
 static void
 detach_arena(mstate replaced_arena)
 {
+  // replaced_arena 是要和当前线程分离的 arena
   if (replaced_arena != NULL)
   {
+    // 断言有线程正在使用这个 arena
     assert(replaced_arena->attached_threads > 0);
     /* The current implementation only detaches from main_arena in
 	 case of allocation failure.  This means that it is likely not
 	 beneficial to put the arena on free_list even if the
 	 reference count reaches zero.  */
+   // 计数器数值减 1
     --replaced_arena->attached_threads;
   }
 }
@@ -756,16 +760,22 @@ get_free_list(void)
   mstate replaced_arena = thread_arena;
   // free_list 是一个 malloc_state 链表的链表头（所有的 arena 都有一个单链表串起来）
   mstate result = free_list;
+  // 如果有可用的 arena
   if (result != NULL)
   {
+    // 上锁
     __libc_lock_lock(free_list_lock);
     result = free_list;
+    // 如果有可用的 arena
     if (result != NULL)
     {
+      // next_free 指向的是下一个已经 free 的 arena（malloc_state）
       free_list = result->next_free;
 
       /* The arena will be attached to this thread.  */
+      // 断言没有线程正在使用这个 arena
       assert(result->attached_threads == 0);
+      // 标识正在有一个 线程使用这个 arena
       result->attached_threads = 1;
 
       detach_arena(replaced_arena);
@@ -775,7 +785,9 @@ get_free_list(void)
     if (result != NULL)
     {
       LIBC_PROBE(memory_arena_reuse_free_list, 1, result);
+      // 给 arena 上锁
       __libc_lock_lock(result->mutex);
+      // 设置当前线程 arena 为刚刚从 free_list 上拿的 arena
       thread_arena = result;
     }
   }

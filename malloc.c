@@ -3337,6 +3337,7 @@ __libc_malloc(size_t bytes)
     // 单线程的话只会有一个分配区，所以不需要考虑其他的，直接从 主分配区 分配内存
     victim = _int_malloc(&main_arena, bytes);
 
+    // 断言分配成功，并且 chunk 不是通过 mmap 的方式去分配
     assert(!victim || chunk_is_mmapped(mem2chunk(victim)) ||
            &main_arena == arena_for_chunk(mem2chunk(victim)));
     return victim;
