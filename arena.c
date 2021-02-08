@@ -445,7 +445,8 @@ static char *aligned_heap_area;
 
 /* Create a new heap.  size is automatically rounded up to a multiple
    of the page size. */
-
+// size 堆的大小
+// top_pad 填充大小，mp_.top_pad 默认是 0
 static heap_info *
 new_heap(size_t size, size_t top_pad)
 {
@@ -455,6 +456,7 @@ new_heap(size_t size, size_t top_pad)
   unsigned long ul;
   heap_info *h;
 
+  // 检查 size 是否合法，HEAP_MIN_SIZE 是堆最小的大小，HEAP_MAX_SIZE 是堆最大大小
   if (size + top_pad < HEAP_MIN_SIZE)
     size = HEAP_MIN_SIZE;
   else if (size + top_pad <= HEAP_MAX_SIZE)
@@ -463,6 +465,7 @@ new_heap(size_t size, size_t top_pad)
     return 0;
   else
     size = HEAP_MAX_SIZE;
+  // 向上 页对齐
   size = ALIGN_UP(size, pagesize);
 
   /* A memory region aligned to a multiple of HEAP_MAX_SIZE is needed.
@@ -691,6 +694,7 @@ _int_new_arena(size_t size)
   char *ptr;
   unsigned long misalign;
 
+  // 创建一个新 heap
   h = new_heap(size + (sizeof(*h) + sizeof(*a) + MALLOC_ALIGNMENT),
                mp_.top_pad);
   if (!h)
@@ -778,8 +782,10 @@ get_free_list(void)
       // 标识正在有一个 线程使用这个 arena
       result->attached_threads = 1;
 
+      // 把当前线程的 arena （thread_arena） 分离
       detach_arena(replaced_arena);
     }
+    // 解锁
     __libc_lock_unlock(free_list_lock);
 
     if (result != NULL)
@@ -885,24 +891,29 @@ arena_get2(size_t size, mstate avoid_arena)
 
   static size_t narenas_limit;
 
+  // a 就是从 free_list 获取的一个新的 arena
   a = get_free_list();
   if (a == NULL)
   {
     /* Nothing immediately available, so generate a new arena.  */
+    // narenas_limit 是个 静态变量默认就是 0
     if (narenas_limit == 0)
     {
+      // 最多有 arena_max 个 arena
       if (mp_.arena_max != 0)
-        narenas_limit = mp_.arena_max;
+        narenas_limit = mp_.arena_max; // 保存到 narenas_limit
+      // narenas 就是记录现在有多少个 arena
       else if (narenas > mp_.arena_test)
       {
+        // 获取电脑的核心数
         int n = __get_nprocs();
 
         if (n >= 1)
-          narenas_limit = NARENAS_FROM_NCORES(n);
+          narenas_limit = NARENAS_FROM_NCORES(n); // 在 32 位的系统下 arena 的数量限制是：核心数 x2，64 位的系统下，是核心数 x8，可以通过 NARENAS_FROM_NCORES 去转换
         else
           /* We have no information about the system.  Assume two
                    cores.  */
-          narenas_limit = NARENAS_FROM_NCORES(2);
+          narenas_limit = NARENAS_FROM_NCORES(2); // 执行到这里说明我们拿不到核心数（核心数 n 不可能是负数），直接假设有两个核心
       }
     }
   repeat:;
@@ -914,8 +925,10 @@ arena_get2(size_t size, mstate avoid_arena)
          narenas_limit is 0.  There is no possibility for narenas to
          be too big for the test to always fail since there is not
          enough address space to create that many arenas.  */
+    // 查看 arena 数量有没有超过限制
     if (__glibc_unlikely(n <= narenas_limit - 1))
     {
+      // narena 是所有线程共享的，所以需要 原子操作，把 narenas 的数值更新成 n + 1
       if (catomic_compare_and_exchange_bool_acq(&narenas, n + 1, n))
         goto repeat;
       a = _int_new_arena(size);
