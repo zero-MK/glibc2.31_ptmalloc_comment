@@ -305,6 +305,7 @@ ptmalloc_init(void)
   // 初始化主分配区
   malloc_init_state(&main_arena);
 
+// 其实也没多大关系所以，详细见：https://www.gnu.org/software/libc/manual/html_node/Memory-Allocation-Tunables.html
 #if HAVE_TUNABLES
   TUNABLE_GET(check, int32_t, TUNABLE_CALLBACK(set_mallopt_check));
   TUNABLE_GET(top_pad, size_t, TUNABLE_CALLBACK(set_top_pad));
