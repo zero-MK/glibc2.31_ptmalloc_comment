@@ -2035,7 +2035,7 @@ malloc_init_state(mstate av)
     set_noncontiguous(av); // 不需要连续的空间
 
   if (av == &main_arena)
-    set_max_fast(DEFAULT_MXFAST);                    // 设置 global_max_fast，也就是最大的 fastbin 的 chunks 的大小，公式：(64 * SIZE_SZ / 4)，也就是说在 32 bit 的机器下 fastbin 里面最大的 chunks 大小为 64，在 32 bit 的机器下 fastbin 里面最大的 chunks 大小为 128
+    set_max_fast(DEFAULT_MXFAST);                    // 设置 global_max_fast，也就是最大的 fastbin 的 chunks 的大小，公式：(64 * SIZE_SZ / 4)，也就是说在 32 bit 的机器下 fastbin 里面最大的 chunks 大小为 64，在 64 bit 的机器下 fastbin 里面最大的 chunks 大小为 128
   atomic_store_relaxed(&av->have_fastchunks, false); // have_fastchunks 标识是否有 fastbin。初始化 arena 时，arena 当然是没有 fastbins 的
 
   // 初始化 top chunk（其实 top chunk 是 arena 的 bins[0]）
