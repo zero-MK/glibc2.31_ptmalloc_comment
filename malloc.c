@@ -1160,27 +1160,28 @@ nextchunk-> +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 */
 
 /* conversion from malloc headers to user pointers, and back */
-
+// 用户指针和 chunk 指针的转换
 #define chunk2mem(p) ((void *)((char *)(p) + 2 * SIZE_SZ))
 #define mem2chunk(mem) ((mchunkptr)((char *)(mem)-2 * SIZE_SZ))
 
 /* The smallest possible chunk */
+// 最小 chunk 的大小，从这个宏可以看到，最小的 chunk 必须包含 prev_size size fd bk 四个字段，32位系统下最小 chunk 是 16 字节，64 位系统下最小 chunk 是 32
 #define MIN_CHUNK_SIZE (offsetof(struct malloc_chunk, fd_nextsize))
 
 /* The smallest size we can malloc is an aligned minimal chunk */
-
+// malloc 分配得到的 最小 chunk 的大小（向 MALLOC_ALIGN 对齐后得到的大小）
 #define MINSIZE \
   (unsigned long)(((MIN_CHUNK_SIZE + MALLOC_ALIGN_MASK) & ~MALLOC_ALIGN_MASK))
 
 /* Check if m has acceptable alignment */
-
+// 检查 m 有没有向 MALLOC_ALIGN 对齐
 #define aligned_OK(m) (((unsigned long)(m)&MALLOC_ALIGN_MASK) == 0)
 
 #define misaligned_chunk(p) \
   ((uintptr_t)(MALLOC_ALIGNMENT == 2 * SIZE_SZ ? (p) : chunk2mem(p)) & MALLOC_ALIGN_MASK)
 
 /* pad request bytes into a usable size -- internal version */
-// 计算 chunk 的大小，这里的设计是这样的，先加上对齐的字节数，然后抹掉低位
+// 计算 chunk 的大小，这里的设计是这样的，先加上（对齐的字节数-1），然后抹掉低位
 #define request2size(req) \
   (((req) + SIZE_SZ + MALLOC_ALIGN_MASK < MINSIZE) ? MINSIZE : ((req) + SIZE_SZ + MALLOC_ALIGN_MASK) & ~MALLOC_ALIGN_MASK)
 
@@ -1783,10 +1784,12 @@ typedef struct malloc_chunk *mfastbinptr;
 #define fastbin(ar_ptr, idx) ((ar_ptr)->fastbinsY[idx])
 
 /* offset 2 to use otherwise unindexable first 2 bins */
+// 每条 fastbin 里面的 chunk 的大小相差 16（64位系统下），或者 8（32位系统下），所以这里是
 #define fastbin_index(sz) \
   ((((unsigned int)(sz)) >> (SIZE_SZ == 8 ? 4 : 3)) - 2)
 
 /* The maximum fastbin request size we support */
+// fastbin 里面最大 chunk 的大小
 #define MAX_FAST_SIZE (80 * SIZE_SZ / 4)
 
 #define NFASTBINS (fastbin_index(request2size(MAX_FAST_SIZE)) + 1)
@@ -2501,13 +2504,13 @@ do_check_malloc_state(mstate av)
    space to service request for nb bytes, thus requiring that av->top
    be extended or replaced.
  */
-
+// top chunk 没有足够的内存分配的时候调用
 static void *
 sysmalloc(INTERNAL_SIZE_T nb, mstate av)
 {
-  mchunkptr old_top;        /* incoming value of av->top */
-  INTERNAL_SIZE_T old_size; /* its size */
-  char *old_end;            /* its end address */
+  mchunkptr old_top;        /* incoming value of av->top */ // 保存原本的 top chunk 的地址
+  INTERNAL_SIZE_T old_size; /* its size */ // 原本的 top chunk 的大小
+  char *old_end;            /* its end address */ // top chunk 的结束地址
 
   long size; /* arg to first MORECORE or mmap call */
   char *brk; /* return value from MORECORE */
@@ -2523,7 +2526,7 @@ sysmalloc(INTERNAL_SIZE_T nb, mstate av)
   mchunkptr remainder;          /* remainder from allocation */
   unsigned long remainder_size; /* its size */
 
-  size_t pagesize = GLRO(dl_pagesize);
+  size_t pagesize = GLRO(dl_pagesize); // 获取 页 的大小
   bool tried_mmap = false;
 
   /*
@@ -2533,6 +2536,7 @@ sysmalloc(INTERNAL_SIZE_T nb, mstate av)
      rather than expanding top.
    */
 
+  // 如果支持 mmap，并且 请求的内存大小大于 mmap 的阈值，mmap 分配的内存区块没有达到限制
   if (av == NULL || ((unsigned long)(nb) >= (unsigned long)(mp_.mmap_threshold) && (mp_.n_mmaps < mp_.n_mmaps_max)))
   {
     char *mm; /* return value from mmap call*/
@@ -2547,7 +2551,7 @@ sysmalloc(INTERNAL_SIZE_T nb, mstate av)
          need for further alignments unless we have have high alignment.
        */
     if (MALLOC_ALIGNMENT == 2 * SIZE_SZ)
-      size = ALIGN_UP(nb + SIZE_SZ, pagesize);
+      size = ALIGN_UP(nb + SIZE_SZ, pagesize); // 按页对齐 向上对齐
     else
       size = ALIGN_UP(nb + SIZE_SZ + MALLOC_ALIGN_MASK, pagesize);
     tried_mmap = true;
@@ -2555,12 +2559,14 @@ sysmalloc(INTERNAL_SIZE_T nb, mstate av)
     /* Don't try if size wraps around 0 */
     if ((unsigned long)(size) > (unsigned long)(nb))
     {
+      // 通过系统调用 mmap 去分配一个 大小位 size 的，权限是 可读可写 的 匿名私有（展开 MMAP 宏后可以看到） 内存块
       mm = (char *)(MMAP(0, size, PROT_READ | PROT_WRITE, 0));
 
+      // 如果 mmap 失败
       if (mm != MAP_FAILED)
       {
         /*
-                 The offset to the start of the mmapped region is stored
+                 The of                fset to the start of the mmapped region is stored
                  in the prev_size field of the chunk. This allows us to adjust
                  returned start address to meet alignment requirements here
                  and in memalign(), and still be able to compute proper
@@ -3851,7 +3857,7 @@ _int_malloc(mstate av, size_t bytes)
      This code is safe to execute even if av is not yet initialized, so we
      can try it without checking, which saves some time on this fast path.
    */
-
+// 遍历 fb 所在的 fastbin
 #define REMOVE_FB(fb, victim, pp) \
   do                              \
   {                               \
