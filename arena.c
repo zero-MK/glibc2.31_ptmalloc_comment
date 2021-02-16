@@ -278,15 +278,15 @@ extern struct dl_open_hook *_dl_open_hook;
 libc_hidden_proto(_dl_open_hook);
 #endif
 
-// ptmalloc_init 初始化堆
+// ptmalloc_init 初始化 ptmalloc 的各个数据结构
 static void
 ptmalloc_init(void)
 {
-  // 全局变量 __malloc_initialized 大于等于 0 说明没有堆已经初始化，直接返回
+  // 全局变量 __malloc_initialized 大于等于 0 表示 ptmalloc 正在初始化或者已经初始化，直接返回
   if (__malloc_initialized >= 0)
     return;
 
-  // 标识 heap 正在初始化
+  // 标识 ptmalloc 正在初始化
   __malloc_initialized = 0;
 
 #ifdef SHARED

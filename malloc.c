@@ -2032,6 +2032,7 @@ malloc_init_state(mstate av)
     bin->fd = bin->bk = bin;
   }
 
+// 这里 MORECORE_CONTIGUOUS 宏表示在分配内存的时候尽可能使用连续的空间
 #if MORECORE_CONTIGUOUS
   // 如果不是初始化 主分配区
   if (av != &main_arena)
@@ -2040,7 +2041,7 @@ malloc_init_state(mstate av)
 
   if (av == &main_arena)
     set_max_fast(DEFAULT_MXFAST);                    // 设置 global_max_fast，也就是最大的 fastbin 的 chunks 的大小，公式：(64 * SIZE_SZ / 4)，也就是说在 32 bit 的机器下 fastbin 里面最大的 chunks 大小为 64，在 64 bit 的机器下 fastbin 里面最大的 chunks 大小为 128
-  atomic_store_relaxed(&av->have_fastchunks, false); // have_fastchunks 标识是否有 fastbin。初始化 arena 时，arena 当然是没有 fastbins 的
+  atomic_store_relaxed(&av->have_fastchunks, false); // have_fastchunks 标识是否有 fastbin。刚开始初始化 arena 时，arena 当然是没有 fastbins 的
 
   // 初始化 top chunk（其实 top chunk 是 arena 的 bins[0]）
   av->top = initial_top(av);
@@ -3064,12 +3065,16 @@ systrim(size_t pad, mstate av)
   return 0;
 }
 
+// 用来释放 通过 mmap 分配的 chunk
 static void
 munmap_chunk(mchunkptr p)
 {
+  // 获取 页 的大小
   size_t pagesize = GLRO(dl_pagesize);
+  // 获取 chunk 的 大小 
   INTERNAL_SIZE_T size = chunksize(p);
 
+  // 断言 p chunk 是通过 mmap 分配的
   assert(chunk_is_mmapped(p));
 
   /* Do nothing if the chunk is a faked mmapped chunk in the dumped
@@ -3085,15 +3090,19 @@ munmap_chunk(mchunkptr p)
      page size.  But gcc does not recognize the optimization possibility
      (in the moment at least) so we combine the two values into one before
      the bit test.  */
+  // (block | total_size) & (pagesize - 1) 检查 block | total_size 是否向 pagesize 对齐
   if (__glibc_unlikely((block | total_size) & (pagesize - 1)) != 0 || __glibc_unlikely(!powerof2(mem & (pagesize - 1))))
     malloc_printerr("munmap_chunk(): invalid pointer");
 
+  // n_mmaps 计数减 1（因为 mp_ 结构是多线程共享的，所以操作里面的字段时必须是原子性操作）
   atomic_decrement(&mp_.n_mmaps);
+  // mmapped_mem 是记录现在正在使用的 mmap 的内存的多少，因为要释放 total_size 的内存，所以 mmapped_mem 也要减掉 total_size
   atomic_add(&mp_.mmapped_mem, -total_size);
 
   /* If munmap failed the process virtual memory address space is in a
      bad shape.  Just leave the block hanging around, the process will
      terminate shortly anyway since not much can be done.  */
+  // 通过 munmap 取消 block 为起始地址大小为 total_size 的内存区域的 mmap 映射
   __munmap((char *)block, total_size);
 }
 
