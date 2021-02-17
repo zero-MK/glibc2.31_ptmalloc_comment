@@ -1992,7 +1992,7 @@ static mchunkptr dumped_main_arena_end;   /* Exclusive.  */
 /* There is only one instance of the malloc parameters.  */
 
 static struct malloc_par mp_ =
-    {
+{
         .top_pad = DEFAULT_TOP_PAD,
         .n_mmaps_max = DEFAULT_MMAP_MAX,
         .mmap_threshold = DEFAULT_MMAP_THRESHOLD,
@@ -2152,10 +2152,10 @@ do_check_chunk(mstate av, mchunkptr p)
   unsigned long sz = chunksize(p);
   /* min and max possible addresses assuming contiguous allocation */
 
-  // heap 的最高地址是 top chunk 的地址再加上 top chunk 的 size
+  // heap 的起始地址是 top chunk 的地址再加上 top chunk 的 size
   char *max_address = (char *)(av->top) + chunksize(av->top);
 
-  // heap 的最低地址是 heap 的最高地址减去系统的 内存
+  // heap 的最大地址是 heap 的起始减去分配给 arena 的内存大小
   char *min_address = max_address - av->system_mem;
 
   // 如果 chunk 不是通过 mmap 分配的
@@ -2165,6 +2165,7 @@ do_check_chunk(mstate av, mchunkptr p)
     // p 不是 arena 的 top chunk
     if (p != av->top)
     {
+      // 如果 arena 的 flags 没有设置 NONCONTIGUOUS_BIT 标志位（这个标志位为 0 时尽可能分配连续的内存）
       if (contiguous(av))
       {
         // 断言 p 是一个合法的 位于 heap 里面的地址
@@ -2272,14 +2273,14 @@ do_check_inuse_chunk(mstate av, mchunkptr p)
      if an inuse chunk borders them and debug is on, it's worth doing them.
    */
 
-  // 检查 物理位置上 下一个 chunk 的是不是 inuse（也就是检查 p 的 inuse 标志位）
+  // 检查 物理位置上的 上一个 chunk 的是不是 inuse（也就是检查 p 的 inuse 标志位）
   if (!prev_inuse(p))
   {
     /* Note that we cannot even look at prev unless it is not inuse */
     // 获取 物理位置上 上一个 chunk 的地址
     mchunkptr prv = prev_chunk(p);
 
-    // 断言 p 物理位置上 的上一个 chunk 不是它自己
+    // 断言 p 物理位置上 的上一个 chunk 的下一个 chunk 是它自己
     assert(next_chunk(prv) == p);
     do_check_free_chunk(av, prv);
   }
@@ -3175,6 +3176,7 @@ typedef struct tcache_perthread_struct
   tcache_entry *entries[TCACHE_MAX_BINS];
 } tcache_perthread_struct;
 
+// tcache 和 tcache_shutting_down 都是线程局部变量，每个线程都有独立实例
 static __thread bool tcache_shutting_down = false;
 static __thread tcache_perthread_struct *tcache = NULL;
 
@@ -3187,10 +3189,13 @@ tcache_put(mchunkptr chunk, size_t tc_idx)
 
   /* Mark this chunk as "in the tcache" so the test in _int_free will
      detect a double free.  */
+  // 设置 key 为当前线程的 tcache
   e->key = tcache;
 
+  // 设置 e 为链表头
   e->next = tcache->entries[tc_idx];
   tcache->entries[tc_idx] = e;
+  // 放进来一个 chunk 就增加计数器
   ++(tcache->counts[tc_idx]);
 }
 
@@ -3398,8 +3403,8 @@ void __libc_free(void *mem)
   mstate ar_ptr;
   mchunkptr p; /* chunk corresponding to mem */
 
-  // 检查 malloc.h 中有没有定义 __free_hook 函数
-  // 定义的话则执行它
+  // 检查 malloc.h 中的 __free_hook 函数指针是否赋值
+  // 已经定义的话则执行它
   void (*hook)(void *, const void *) = atomic_forced_read(__free_hook);
   if (__builtin_expect(hook != NULL, 0))
   {
@@ -3407,6 +3412,7 @@ void __libc_free(void *mem)
     return;
   }
 
+  // 如果是 free(0) 的还直接 return
   if (mem == 0) /* free(0) has no effect */
     return;
 
@@ -3414,18 +3420,24 @@ void __libc_free(void *mem)
   // 只要减去 size 和 prev_size 字段的大小就能得到 chunk 的地址（不清楚的话可以去看一下在使用的 chunk 结构体的内存布局）
   p = mem2chunk(mem);
 
-  // 检查 chunk 是不是通过 mmap 分配的
+  // 如果 chunk 是通过 mmap 分配的
   if (chunk_is_mmapped(p)) /* release mmapped memory. */
   {
     /* See if the dynamic brk/mmap threshold needs adjusting.
 	 Dumped fake mmapped chunks do not affect the threshold.  */
+   // no_dyn_threshold 字段表示是否开启 mmap 分配阈值动态调整机制，默认值为 0，也就是默认开启 mmap 分配阈值动态调整机制。
+   // mmap_threshold 字段表示 mmap 的阈值
+   // 如果开启了 分配阈值动态调整机制，并且 free 的 chunk 大小超过了 mmap 的阈值，并且没有超过限制
     if (!mp_.no_dyn_threshold && chunksize_nomask(p) > mp_.mmap_threshold && chunksize_nomask(p) <= DEFAULT_MMAP_THRESHOLD_MAX && !DUMPED_MAIN_ARENA_CHUNK(p))
     {
+      // 更改阈值为当前 chunk 的大小
       mp_.mmap_threshold = chunksize(p);
+      // 收缩阈值
       mp_.trim_threshold = 2 * mp_.mmap_threshold;
       LIBC_PROBE(memory_mallopt_free_dyn_thresholds, 2,
                  mp_.mmap_threshold, mp_.trim_threshold);
     }
+    // 使用 munmap 释放 chunk
     munmap_chunk(p);
     return;
   }
@@ -4546,6 +4558,7 @@ _int_free(mstate av, mchunkptr p, int have_lock)
     malloc_printerr("free(): invalid pointer");
   /* We know that each chunk is at least MINSIZE bytes in size or a
      multiple of MALLOC_ALIGNMENT.  */
+  // 正常分配不可能分配出大小小于 MINSIZE 或者没有对齐的 chunk
   if (__glibc_unlikely(size < MINSIZE || !aligned_OK(size)))
     malloc_printerr("free(): invalid size");
 
@@ -4568,23 +4581,24 @@ _int_free(mstate av, mchunkptr p, int have_lock)
 	   trust it (it also matches random payload data at a 1 in
 	   2^<size_t> chance), so verify it's not an unlikely
 	   coincidence before aborting.  */
-      // key 指向的是每个线程的 tcache_perthread_struct
+      // key 指向的是每个线程的 tcache_perthread_struct，也就是 tcache 
       if (__glibc_unlikely(e->key == tcache))
       {
+        // 遍历第 tc_idx 条 tcache
         tcache_entry *tmp;
         LIBC_PROBE(memory_tcache_double_free, 2, e, tc_idx);
         for (tmp = tcache->entries[tc_idx];
              tmp;
              tmp = tmp->next)
-          if (tmp == e)
+          if (tmp == e) // 如果发现里面有和 e chunk 直接 panic
             malloc_printerr("free(): double free detected in tcache 2");
         /* If we get here, it was a coincidence.  We've wasted a
 	       few cycles, but don't abort.  */
       }
 
       // mp_ 是一个 malloc_par 结构，描述当前 malloc 的各种参数信息
-      // tcache_count  字段是描述 tcache 的最大 chunk 数
-      // 当前 tcache 的 counts 合法的话
+      // tcache_count 字段是描述 tcache 的最大 chunk 数
+      // 当前 tcache 的 counts 合法的话（就是 tcache 还没有满）
       if (tcache->counts[tc_idx] < mp_.tcache_count)
       {
         // 把 p 插入 当前线程的 第 tc_idx 条 tcache
@@ -4615,9 +4629,9 @@ _int_free(mstate av, mchunkptr p, int have_lock)
   {
 
     // 检查 p 的大小是否合法
-    // 2 * SIZE_SZ 是最小 chunk 的大小，chunk 小于这个数的说明，这个 chunk 被破坏了
+    // 2 * SIZE_SZ 是最小 chunk 的大小，p chunk 物理位置相邻的下一个 chunk 的 size 小于这个数的说明，这个 chunk 被破坏了
     if (__builtin_expect(chunksize_nomask(chunk_at_offset(p, size)) <= 2 * SIZE_SZ, 0)
-        //  检查 p 的 size 是不是大于 system_mem（ chunk 的大小不可能大于 system_mem）
+        //  检查 p 物理位置相邻的下一个 chunk 的 size 是不是大于 分配给 arena 的内存的大小（ chunk 的大小不可能大于 system_mem）
         || __builtin_expect(chunksize(chunk_at_offset(p, size)) >= av->system_mem, 0))
     {
       bool fail = true;
@@ -4630,7 +4644,7 @@ _int_free(mstate av, mchunkptr p, int have_lock)
         // 给分配区上锁
         __libc_lock_lock(av->mutex);
 
-        // 再次检查 p 的大小
+        // 检查 p 物理位置相邻的下一个 chunk 的大小
         fail = (chunksize_nomask(chunk_at_offset(p, size)) <= 2 * SIZE_SZ || chunksize(chunk_at_offset(p, size)) >= av->system_mem);
         // 解锁分配区
         __libc_lock_unlock(av->mutex);
@@ -4675,7 +4689,7 @@ _int_free(mstate av, mchunkptr p, int have_lock)
       *fb = p;
     }
 
-    // 如果不是单线程（其实区别就是在多线程时操作分配区要上锁，防止竞争条件）
+    // 如果不是单线程
     else
       do
       {
@@ -4704,7 +4718,7 @@ _int_free(mstate av, mchunkptr p, int have_lock)
   {
 
     /* If we're single-threaded, don't lock the arena.  */
-    // 如果是单线程，就不要给 分配区 上锁
+    // 如果是单线程，就不要给 arena 上锁
     if (SINGLE_THREAD_P)
       have_lock = true;
 
