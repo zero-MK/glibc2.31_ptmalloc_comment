@@ -1868,6 +1868,48 @@ get_max_fast(void)
    malloc_consolidate, it does not affect correctness.  As a result we can safely
    use relaxed atomic accesses.
  */
+/*
++----------------+                                 +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|     mutex      |         +---------------------> |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
++----------------+         |                       ++-+--+--+--+-++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|     flags      |         |                        |            |
++----------------+         |                 +------+            +---------------------------+
+| have_fastchunks|         |                 |                                               |
++----------------+         |                 +--> +------------+    +----> +------------+    +--> +------------+
+|   fastbinsY[]  +---------+                      | prev_size  |    |      | prev_size  |         | prev_size  |
++----------------+                                +------------+    |      +------------+         +------------+
+|      top       |                                |   size     |    |      |   size     |         |   size     |
++----------------+                                +------------+    |      +------------+         +------------+
+| last_remainder |                                |    fd      +----+      |    fd      |         |    fd      |
++----------------+                                +------------+           +------------+         +------------+
+|     bins[]     +--------------------+           |    bk      |           |    bk      |         |    bk      |
++----------------+                    |           +------------+           +------------+         +------------+
+|   binmap[]     |                    |           |            |           |            |         |            |
++----------------+                    |           |            |           |            |         |            |
+|     next       |                    |           +------------+           +------------+         +------------+
++----------------+                    |
+|   next_free    |                    |
++----------------+                    |              +--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|attached_threads|                    +------------> |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |  |
++----------------+                                   ++-+--+--+-++--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+--+
+|  system_mem    |                                    |         |
++----------------+                             +------+         +-----------------------------+
+| max_system_mem |                             |                                              |
++----------------+                             +--> +------------+ <+ +----> +------------+   +---> +------------+
+                                                    | prev_size  |  | |      | prev_size  |         | prev_size  |
+                                                    +------------+  | |      +------------+         +------------+
+                                                    |   size     |  | |      |   size     |         |   size     |
+                                                    +------------+  | |      +------------+         +------------+
+                                                    |    fd      +----+      |    fd      |         |    fd      |
+                                                    +------------+  |        +------------+         +------------+
+                                                    |    bk      |  +--------+    bk      |         |    bk      |
+                                                    +------------+           +------------+         +------------+
+                                                    |            |           |            |         |            |
+                                                    |            |           |            |         |            |
+                                                    +------------+           +------------+         +------------+
+*/
+
+
 //保存堆的状态结构
 struct malloc_state
 {
@@ -1920,6 +1962,36 @@ struct malloc_state
   INTERNAL_SIZE_T system_mem;
   // 记录当前分配区最大分配的内存大小
   INTERNAL_SIZE_T max_system_mem;
+  /*
++----------------+
+|     mutex      |
++----------------+
+|     flags      |
++----------------+
+| have_fastchunks|
++----------------+
+|   fastbinsY[]  |
++----------------+
+|      top       |
++----------------+
+| last_remainder |
++----------------+
+|     bins[]     |
++----------------+
+|   binmap[]     |
++----------------+
+|     next       |
++----------------+
+|   next_free    |
++----------------+
+|attached_threads|
++----------------+
+|  system_mem    |
++----------------+
+| max_system_mem |
++----------------+
+
+  */
 };
 
 struct malloc_par
@@ -1992,7 +2064,7 @@ static mchunkptr dumped_main_arena_end;   /* Exclusive.  */
 /* There is only one instance of the malloc parameters.  */
 
 static struct malloc_par mp_ =
-{
+    {
         .top_pad = DEFAULT_TOP_PAD,
         .n_mmaps_max = DEFAULT_MMAP_MAX,
         .mmap_threshold = DEFAULT_MMAP_THRESHOLD,
@@ -3072,7 +3144,7 @@ munmap_chunk(mchunkptr p)
 {
   // 获取 页 的大小
   size_t pagesize = GLRO(dl_pagesize);
-  // 获取 chunk 的 大小 
+  // 获取 chunk 的 大小
   INTERNAL_SIZE_T size = chunksize(p);
 
   // 断言 p chunk 是通过 mmap 分配的
@@ -3398,7 +3470,7 @@ __libc_malloc(size_t bytes)
 }
 libc_hidden_def(__libc_malloc)
 
-void __libc_free(void *mem)
+    void __libc_free(void *mem)
 {
   mstate ar_ptr;
   mchunkptr p; /* chunk corresponding to mem */
@@ -3425,9 +3497,9 @@ void __libc_free(void *mem)
   {
     /* See if the dynamic brk/mmap threshold needs adjusting.
 	 Dumped fake mmapped chunks do not affect the threshold.  */
-   // no_dyn_threshold 字段表示是否开启 mmap 分配阈值动态调整机制，默认值为 0，也就是默认开启 mmap 分配阈值动态调整机制。
-   // mmap_threshold 字段表示 mmap 的阈值
-   // 如果开启了 分配阈值动态调整机制，并且 free 的 chunk 大小超过了 mmap 的阈值，并且没有超过限制
+    // no_dyn_threshold 字段表示是否开启 mmap 分配阈值动态调整机制，默认值为 0，也就是默认开启 mmap 分配阈值动态调整机制。
+    // mmap_threshold 字段表示 mmap 的阈值
+    // 如果开启了 分配阈值动态调整机制，并且 free 的 chunk 大小超过了 mmap 的阈值，并且没有超过限制
     if (!mp_.no_dyn_threshold && chunksize_nomask(p) > mp_.mmap_threshold && chunksize_nomask(p) <= DEFAULT_MMAP_THRESHOLD_MAX && !DUMPED_MAIN_ARENA_CHUNK(p))
     {
       // 更改阈值为当前 chunk 的大小
@@ -3462,33 +3534,43 @@ libc_hidden_def(__libc_free)
 
   void *newp; /* chunk to return */
 
+  // 检查有没有设置 hook
   void *(*hook)(void *, size_t, const void *) =
       atomic_forced_read(__realloc_hook);
   if (__builtin_expect(hook != NULL, 0))
     return (*hook)(oldmem, bytes, RETURN_ADDRESS(0));
 
 #if REALLOC_ZERO_BYTES_FREES
+  // 如果 realloc 的 大小为 0 ，并且 oldmem 有效的情况下，当成 free 处理
   if (bytes == 0 && oldmem != NULL)
   {
+    // 直接 free
     __libc_free(oldmem);
     return 0;
   }
 #endif
 
   /* realloc of null is supposed to be same as malloc */
+  // 如果重新分配的 chunk 无效，当成 malloc 处理
   if (oldmem == 0)
     return __libc_malloc(bytes);
 
   /* chunk corresponding to oldmem */
+  // 获取 oldmem 对应的 chunk
   const mchunkptr oldp = mem2chunk(oldmem);
   /* its size */
+  // 获取原来的 chunk 的大小
   const INTERNAL_SIZE_T oldsize = chunksize(oldp);
 
+  // 如果 chunk 是通过 mmap 分配的肯定是不属于那个 arena 的
   if (chunk_is_mmapped(oldp))
-    ar_ptr = NULL;
+    ar_ptr = NULL; // 所以把 ar_ptr 置空
   else
   {
+    // 如果 chunk 不是通过 mmap 分配的
+    // 先检查 tcache 有没有初始化
     MAYBE_INIT_TCACHE();
+    // 获取 chunk 对应的 arena
     ar_ptr = arena_for_chunk(oldp);
   }
 
@@ -3501,6 +3583,7 @@ libc_hidden_def(__libc_free)
   if ((__builtin_expect((uintptr_t)oldp > (uintptr_t)-oldsize, 0) || __builtin_expect(misaligned_chunk(oldp), 0)) && !DUMPED_MAIN_ARENA_CHUNK(oldp))
     malloc_printerr("realloc(): invalid pointer");
 
+  // 检查 chunk 的 size 是否合法，把 size 放入 bytes
   if (!checked_request2size(bytes, &nb))
   {
     __set_errno(ENOMEM);
@@ -3930,7 +4013,7 @@ _int_malloc(mstate av, size_t bytes)
         /* While we're here, if we see other chunks of the same size,
 		 stash them in the tcache.  */
         size_t tc_idx = csize2tidx(nb);
-        // 如果 fastbin 里面有 chunk，并且 chunk 对应的 tcache 没有满的时候 
+        // 如果 fastbin 里面有 chunk，并且 chunk 对应的 tcache 没有满的时候
         if (tcache && tc_idx < mp_.tcache_bins)
         {
           mchunkptr tc_victim;
@@ -4581,7 +4664,7 @@ _int_free(mstate av, mchunkptr p, int have_lock)
 	   trust it (it also matches random payload data at a 1 in
 	   2^<size_t> chance), so verify it's not an unlikely
 	   coincidence before aborting.  */
-      // key 指向的是每个线程的 tcache_perthread_struct，也就是 tcache 
+      // key 指向的是每个线程的 tcache_perthread_struct，也就是 tcache
       if (__glibc_unlikely(e->key == tcache))
       {
         // 遍历第 tc_idx 条 tcache
