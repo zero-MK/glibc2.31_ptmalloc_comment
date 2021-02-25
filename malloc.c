@@ -2217,6 +2217,7 @@ free_perturb(char *p, size_t n)
    Properties of all chunks
  */
 
+// 检查某个 arena 里面的某个 chunk 的各个字段
 static void
 do_check_chunk(mstate av, mchunkptr p)
 {
@@ -2691,8 +2692,10 @@ sysmalloc(INTERNAL_SIZE_T nb, mstate av)
         // 取最大值
         atomic_max(&mp_.max_mmapped_mem, sum);
 
+        // 检查 p chunk 是否合法
         check_chunk(av, p);
 
+        // 返回的指针指向 fd 的位置，用户可以从这个地方写入数据
         return chunk2mem(p);
       }
     }
